@@ -1,0 +1,35 @@
+name: Benchmark
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  benchmark-lite:
+    name: Benchmark (Lite)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+      - run: uv python install 3.12
+
+      - name: Install dependencies
+        run: |
+          uv venv
+          uv pip install inferwall
+          uv pip install datasets
+
+      - name: Run Lite benchmark
+        run: uv run python tests/benchmark/run_benchmark.py --profiles lite --datasets custom,owasp --output results/lite.json --report results/lite_report.md
+
+      - name: Show results
+        run: cat results/lite_report.md
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: results/
+          retention-days: 30
