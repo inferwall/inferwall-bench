@@ -14,17 +14,36 @@ python tests/benchmark/run_benchmark.py --profiles lite --datasets custom,owasp
 
 # Run full benchmark with HuggingFace datasets
 pip install datasets
-python tests/benchmark/run_benchmark.py --profiles lite --datasets deepset,custom,owasp
+python tests/benchmark/run_benchmark.py --profiles lite --datasets deepset,jackhhao,toxic-chat,safeguard,custom,owasp
 ```
+
+## HuggingFace Token
+
+Some datasets may require authentication. Set your HuggingFace token as an environment variable:
+
+```bash
+export HF_TOKEN=hf_your_token_here
+```
+
+You can generate a token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens). The token is passed automatically to all dataset loaders.
 
 ## Datasets
 
-| Dataset | Source | Samples | Description |
-|---------|--------|---------|-------------|
-| deepset | [HuggingFace](https://huggingface.co/datasets/deepset/prompt-injections) | ~662 | Most widely used benchmark |
-| jasper | [HuggingFace](https://huggingface.co/datasets/JasperLS/prompt-injections) | varies | Diverse attack types |
-| custom | Local | 100 | Hand-curated (50 malicious + 50 benign edge cases) |
-| owasp | Local | 50 | OWASP LLM Top 10 2025 coverage |
+### HuggingFace Datasets
+
+| Name | HuggingFace ID | Total Samples | Malicious | Benign | Description |
+|------|----------------|---------------|-----------|--------|-------------|
+| deepset | deepset/prompt-injections | 116 | 60 | 56 | Foundational prompt injection benchmark |
+| jackhhao | jackhhao/jailbreak-classification | 262 | 139 | 123 | Balanced jailbreak detection |
+| toxic-chat | lmsys/toxic-chat (toxicchat0124) | 5,083 | 91 | 4,992 | Real user-AI traffic with jailbreak labels |
+| safeguard | xTRam1/safe-guard-prompt-injection | 2,060 | 650 | 1,410 | Broad prompt injection coverage |
+
+### Local Datasets
+
+| Name | Samples | Description |
+|------|---------|-------------|
+| custom | 100 | Hand-curated (50 malicious + 50 benign edge cases) |
+| owasp | 50 | OWASP LLM Top 10 2025 coverage |
 
 ## Metrics
 

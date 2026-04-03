@@ -17,7 +17,7 @@ benchmark-full:
 
 # Run all profiles on all datasets
 benchmark-all:
-    python tests/benchmark/run_benchmark.py --profiles lite,standard,full --datasets deepset,jasper,custom,owasp --output results/all.json --report results/benchmark_report.md
+    python tests/benchmark/run_benchmark.py --profiles lite,standard,full --datasets deepset,jackhhao,toxic-chat,safeguard,custom,owasp --output results/all.json --report results/benchmark_report.md
 
 # Run Lite benchmark on local datasets only (no HuggingFace download)
 benchmark-quick:
