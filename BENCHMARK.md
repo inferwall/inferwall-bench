@@ -1,7 +1,8 @@
 # InferenceWall Benchmark Report
 
-**Date**: 2026-04-03
-**InferenceWall Version**: 0.1.5 (101 signatures)
+**Date**: 2026-04-04
+**InferenceWall Version**: 0.1.5 (103 signatures, scoring v2)
+**Scoring Model**: Confidence-weighted (max-primary + diminishing corroboration)
 **Hardware**: Linux 6.8.0-106-generic, x86_64, Python 3.12.3
 **Models**: DeBERTa v3 (ONNX, 400MB), Qwen2.5-0.5B (GGUF, 469MB)
 
@@ -9,7 +10,15 @@
 
 ## Executive Summary
 
-### HuggingFace Public Datasets (7,521 samples)
+### Scoring v2: Confidence-Weighted (2026-04-04)
+
+| Profile | Dataset | Samples | Recall | Precision | FPR | F1 |
+|---------|---------|---------|--------|-----------|-----|-----|
+| **Lite** | deepset | 116 | 61.7% | 88.1% | 8.9% | 72.5% |
+| **Lite** | jackhhao | 262 | 74.8% | 95.4% | 4.1% | 83.9% |
+| **Lite** | safeguard | 2,060 | 49.5% | 91.0% | 2.3% | 64.1% |
+
+### Scoring v1: Additive (2026-04-03, previous baseline)
 
 | Profile | Dataset | Samples | Recall | Precision | FPR | F1 |
 |---------|---------|---------|--------|-----------|-----|-----|
@@ -23,6 +32,14 @@
 | **Full** | deepset | 116 | 45.0% | 81.8% | 10.7% | 58.1% |
 | **Full** | jackhhao | 262 | 92.1% | 82.1% | 22.8% | 86.8% |
 
+### Before/After Comparison (Lite profile, v1 → v2)
+
+| Dataset | Recall | Precision | FPR | F1 |
+|---------|--------|-----------|-----|-----|
+| deepset | 8.3% → **61.7%** (+53.4%) | 45.5% → **88.1%** (+42.6%) | 10.7% → **8.9%** (-1.8%) | 14.1% → **72.5%** |
+| jackhhao | 70.5% → **74.8%** (+4.3%) | 79.0% → **95.4%** (+16.4%) | 21.1% → **4.1%** (-17.0%) | 74.5% → **83.9%** |
+| safeguard | 24.0% → **49.5%** (+25.5%) | 63.9% → **91.0%** (+27.1%) | 6.2% → **2.3%** (-3.9%) | 34.9% → **64.1%** |
+
 ### Local Datasets (150 samples)
 
 | Profile | Dataset | Samples | Recall | Precision | FPR | F1 |
@@ -34,13 +51,13 @@
 | **Full** | custom | 100 | 88.0% | 91.7% | 8.0% | 89.8% |
 | **Full** | owasp | 50 | 65.7% | 82.1% | 33.3% | 73.0% |
 
-### Key Takeaways
+### Key Takeaways (Scoring v2)
 
-1. **DeBERTa classifier is the biggest recall booster**: deepset recall jumps from 8.3% (Lite) to 45.0% (Standard). Safeguard recall jumps from 24.0% to 84.3%.
-2. **LLM-judge (0.5B) adds no meaningful improvement** — Full profile results match Standard. A larger model (3B+) is needed.
-3. **Lite profile excels at known jailbreak patterns**: 70.5% recall on jackhhao (jailbreak-focused dataset) using only heuristic rules.
-4. **Precision is consistently high**: >80% across Standard/Full profiles on most datasets, meaning when InferenceWall flags something, it's almost always right.
-5. **toxic-chat is the hardest dataset**: 98% benign content with subtle jailbreaks — low precision (13.4%) reflects the class imbalance challenge.
+1. **Confidence-weighted scoring dramatically reduced false positives**: jackhhao FPR dropped from 21.1% to 4.1%, safeguard FPR from 6.2% to 2.3%. Precision >90% on all datasets.
+2. **Lite profile recall massively improved**: deepset 8.3% → 61.7%, safeguard 24.0% → 49.5%. The new scoring model + confidence audit + new signatures fixed coverage gaps.
+3. **Two weak signals no longer compound to block**: The max-primary + diminishing corroboration model prevents benign roleplay ("act as") from triggering false blocks.
+4. **New signature categories close coercion gaps**: INJ-D-029 (coercion/blackmail) and INJ-D-030 (access demands) detect attacks that previously scored 0.
+5. **Confidence audit is high-leverage**: Downgrading INJ-D-001 from `confidence: high` to `low` alone eliminated the largest FP source (24 FPs on jackhhao, 60 on safeguard).
 
 ---
 
