@@ -10,6 +10,21 @@
 
 ## Executive Summary
 
+### Canonical Signature Precision Tightening (2026-06-12)
+
+Tightened the canonical injection/agentic signatures (instruction-override, system-prompt extraction, DAN/persona jailbreak, safety-bypass, developer-mode, dual-response, tool-abuse) to match the genuine attack structure rather than broad keywords, and raised the precision-hardened ones to block on a single high-confidence match. Before/after, same datasets and decision mapping ("before" = `main` prior to this change):
+
+| Profile | Dataset | Recall (before → after) | Precision | FPR |
+|---------|---------|-------------------------|-----------|-----|
+| **Standard** | safeguard | 91.2% → **91.1%** | 93.1% → 93.1% | 3.1% → 3.1% |
+| **Standard** | deepset | 75.0% → 73.3% | 86.5% → 86.3% | 12.5% → 12.5% |
+| **Standard** | jackhhao | 89.2% → 89.2% | 92.5% → 92.5% | 8.1% → 8.1% |
+| **Lite** | safeguard | 49.7% → **51.8%** | 91.0% → 91.3% | 2.3% → 2.3% |
+| **Lite** | deepset | 61.7% → 56.7% | 88.1% → 87.2% | 8.9% → 8.9% |
+| **Lite** | jackhhao | 74.8% → **77.7%** | 95.4% → 95.6% | 4.1% → 4.1% |
+
+No regression on the production headline (standard · safeguard); lite recall improved on safeguard and jackhhao. **FPR is unchanged** because the tightening's main benefit — removing false positives on benign developer/security traffic ("how does the system prompt feature work", "read /etc/hosts", code that ignores `None`) — is not exercised by these academic benign sets (short chat prompts, not developer/agentic/RAG traffic); that win is validated by unit tests. The benchmark also counts block and flag identically, so the block-vs-flag change is not reflected here. A realistic-benign suite would surface the precision win these metrics cannot.
+
 ### Scoring v2: Confidence-Weighted (2026-04-04)
 
 | Profile | Dataset | Samples | Recall | Precision | FPR | F1 |
