@@ -1,0 +1,10 @@
+{
+  "_comment": "CI regression gate thresholds for the model-free lite smoke benchmark (.github/workflows/benchmark-smoke.yml). Measured on lite profile (regex floor only, no model downloads). recall_floor: minimum lite recall on data/smoke_malicious.jsonl. fpr_ceiling: maximum lite FPR on data/realistic_benign.jsonl. Observed at baseline: recall=1.00 (10/10), FPR=0.060 (9/150). Floor/ceiling set with headroom so only a real regression trips the gate. Update deliberately when signatures change and the new numbers are reviewed.",
+  "profile": "lite",
+  "observed": {
+    "smoke_recall": 1.0,
+    "realistic_benign_fpr": 0.06
+  },
+  "recall_floor": 0.9,
+  "fpr_ceiling": 0.08
+}

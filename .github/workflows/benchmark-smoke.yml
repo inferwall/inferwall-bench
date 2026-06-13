@@ -1,0 +1,40 @@
+name: Benchmark Smoke (regression gate)
+
+# Fast, model-free regression gate that runs on every PR. Uses the lite profile
+# (Rust regex floor only — no ONNX/FAISS, no model downloads) over committed
+# local corpora and fails if detection recall drops below the floor or the
+# false-positive rate rises above the ceiling in
+# tests/benchmark/regression_baseline.json. Designed to finish in well under
+# three minutes with no network access to model hosts.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  smoke-gate:
+    name: Lite smoke regression gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Install Python
+        run: uv python install 3.12
+
+      - name: Install inferwall (no model profiles)
+        run: |
+          uv venv
+          # Only the firewall package + its Rust core regex engine. No
+          # `inferwall models install`, so no ONNX/FAISS downloads.
+          uv pip install inferwall
+
+      - name: Run lite smoke regression gate
+        env:
+          IW_PROFILE: lite
+          PYTHONPATH: .
+        run: uv run python tests/benchmark/smoke.py
