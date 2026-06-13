@@ -9,6 +9,16 @@ from pathlib import Path
 from typing import Any
 
 
+def _ci_pct(ci: list[float] | None, n: int) -> str:
+    """Render a [point, lo, hi] CI triple as 'P% ±H' rounded by sample size."""
+    if not ci:
+        return "—"
+    point, lo, hi = ci
+    dp = 0 if n < 300 else 1
+    half = (hi - lo) / 2 * 100
+    return f"{point * 100:.{dp}f}% ±{half:.{dp}f}"
+
+
 def generate_report(results: Any, output_path: Path) -> None:
     """Generate a markdown benchmark report."""
     lines: list[str] = []
@@ -18,12 +28,17 @@ def generate_report(results: Any, output_path: Path) -> None:
     iw_ver = results.inferwall_version if hasattr(results, "inferwall_version") else results["inferwall_version"]
     py_ver = results.python_version if hasattr(results, "python_version") else results["python_version"]
 
+    seed = getattr(results, "seed", None) if hasattr(results, "seed") else results.get("seed")
+    provenance = getattr(results, "provenance", None) if hasattr(results, "provenance") else results.get("provenance")
+
     lines.append("# InferenceWall Benchmark Report")
     lines.append("")
     lines.append(f"**Date**: {timestamp}")
     lines.append(f"**Hardware**: {hardware}")
     lines.append(f"**InferenceWall**: v{iw_ver}")
     lines.append(f"**Python**: {py_ver}")
+    if seed is not None:
+        lines.append(f"**Seed**: {seed}")
     lines.append("")
 
     # --- Dataset Summary ---
@@ -51,6 +66,81 @@ def generate_report(results: Any, output_path: Path) -> None:
             f"{m['f1']:.1%} | {m['fpr']:.1%} | {m['accuracy']:.1%} |"
         )
     lines.append("")
+
+    # --- Statistical Summary (bootstrap 95% CIs + AUC) ---
+    has_ci = any(m.get("ci") for m in metrics)
+    if has_ci:
+        lines.append("## Statistical Summary (95% bootstrap CIs)")
+        lines.append("")
+        lines.append(
+            "Metrics shown as **point ± 95% CI** (2,000-resample percentile "
+            "bootstrap, seeded). CI half-width rounds to whole percent for "
+            "n<300 sets. ROC-AUC / PR-AUC are threshold-independent."
+        )
+        lines.append("")
+        lines.append("| System | Dataset | n | Recall | Precision | F1 | FPR | ROC-AUC | PR-AUC |")
+        lines.append("|--------|---------|---|--------|-----------|-----|-----|---------|--------|")
+        for m in metrics:
+            ci = m.get("ci") or {}
+            auc = m.get("auc") or {}
+            n = m["total"]
+            lines.append(
+                f"| {m['system']} | {m['dataset']} | {n} | "
+                f"{_ci_pct(ci.get('recall'), n)} | {_ci_pct(ci.get('precision'), n)} | "
+                f"{_ci_pct(ci.get('f1'), n)} | {_ci_pct(ci.get('fpr'), n)} | "
+                f"{auc.get('roc_auc', '—')} | {auc.get('pr_auc', '—')} |"
+            )
+        lines.append("")
+
+    # --- Per-attack-class split ---
+    has_split = any(m.get("by_attack_class") for m in metrics)
+    if has_split:
+        lines.append("## Per-Attack-Class Breakdown")
+        lines.append("")
+        lines.append(
+            "Recall split by attack class (injection / jailbreak); benign rows "
+            "report FPR since recall is undefined for the negative class."
+        )
+        lines.append("")
+        lines.append("| System | Dataset | Class | n | Recall | FPR |")
+        lines.append("|--------|---------|-------|---|--------|-----|")
+        for m in metrics:
+            for cls, stats in sorted((m.get("by_attack_class") or {}).items()):
+                rec = f"{stats['recall']:.1%}" if "recall" in stats else "—"
+                fp = f"{stats['fpr']:.1%}" if "fpr" in stats else "—"
+                lines.append(
+                    f"| {m['system']} | {m['dataset']} | {cls} | "
+                    f"{stats['n']} | {rec} | {fp} |"
+                )
+        lines.append("")
+
+    # --- Threshold sweep (precision-recall table) ---
+    has_sweep = any(m.get("pr_curve") for m in metrics)
+    if has_sweep:
+        lines.append("## Threshold Sweep (precision-recall)")
+        lines.append("")
+        lines.append(
+            "Recall / precision / FPR across the score-threshold grid. The "
+            "production inbound flag threshold is 4.0; rows bracket the "
+            "operating point so the precision-recall trade-off is visible."
+        )
+        lines.append("")
+        for m in metrics:
+            sweep = m.get("pr_curve")
+            if not sweep:
+                continue
+            lines.append(f"### {m['system']} — {m['dataset']}")
+            lines.append("")
+            lines.append("| Threshold | Recall | Precision | FPR |")
+            lines.append("|-----------|--------|-----------|-----|")
+            # Sample ~10 rows evenly so the table stays readable.
+            step = max(1, len(sweep) // 10)
+            for row in sweep[::step]:
+                lines.append(
+                    f"| {row['threshold']:.2f} | {row['recall']:.1%} | "
+                    f"{row['precision']:.1%} | {row['fpr']:.1%} |"
+                )
+            lines.append("")
 
     # --- Head-to-Head Comparison ---
     datasets_seen = sorted(set(m["dataset"] for m in metrics))
@@ -182,6 +272,35 @@ def generate_report(results: Any, output_path: Path) -> None:
         lines.append("All attacks detected across all systems and datasets.")
         lines.append("")
 
+    # --- Provenance ---
+    if provenance:
+        lines.append("## Reproducibility Provenance")
+        lines.append("")
+        lines.append(f"- **Bench commit**: `{provenance.get('bench_git_commit', 'unknown')}`")
+        lines.append(f"- **Seed**: {provenance.get('seed', '—')}")
+        pol = provenance.get("policy", {})
+        if pol.get("thresholds"):
+            t = pol["thresholds"]
+            lines.append(
+                f"- **Policy** `{pol.get('policy_name', '?')}` "
+                f"({pol.get('signature_count', '?')} signatures): "
+                f"inbound flag={t['inbound_flag']} block={t['inbound_block']}"
+            )
+        revs = provenance.get("dataset_revisions", {})
+        if revs:
+            lines.append("- **Dataset revisions** (pinned):")
+            for name, meta in revs.items():
+                lines.append(
+                    f"    - `{name}` ({meta.get('hf_id', '?')}) "
+                    f"@ `{meta.get('revision', 'unpinned')}`"
+                )
+        models = provenance.get("model_sha256", {})
+        if models:
+            lines.append("- **Model SHA256** (best-effort):")
+            for path, digest in models.items():
+                lines.append(f"    - `{path}`: `{digest[:16]}…`")
+        lines.append("")
+
     # --- Methodology ---
     lines.append("## Methodology")
     lines.append("")
@@ -199,11 +318,14 @@ def generate_report(results: Any, output_path: Path) -> None:
     lines.append("- Note: Latency measurements excluded (VM environment, not representative of production)")
     lines.append("")
     lines.append("### Reproducibility")
+    lines.append("Dataset revisions are pinned in `tests/benchmark/DATASETS.lock`; "
+                 "the global seed and full provenance are recorded above.")
     lines.append("```bash")
-    lines.append("pip install inferwall datasets llama-cpp-python")
-    lines.append("python tests/benchmark/run_benchmark.py \\")
-    lines.append("    --datasets deepset,jackhhao,toxic-chat,safeguard \\")
-    lines.append("    --phi4-model /path/to/Phi-4-mini-instruct-Q4_K_M.gguf")
+    lines.append("pip install inferwall datasets")
+    lines.append("inferwall models install --profile standard")
+    lines.append("PYTHONPATH=. python tests/benchmark/run_benchmark.py \\")
+    lines.append("    --profiles standard --datasets deepset,jackhhao,safeguard \\")
+    lines.append("    --skip-phi4 --seed 42")
     lines.append("```")
     lines.append("")
 

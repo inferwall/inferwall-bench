@@ -29,6 +29,17 @@ from tests.benchmark.loaders import (
     BenchmarkSample,
     load_dataset_by_name,
 )
+from tests.benchmark.provenance import collect_provenance
+from tests.benchmark.stats import (
+    bootstrap_ci,
+    f1 as f1_at,
+    fpr as fpr_at,
+    precision as precision_at,
+    pr_auc,
+    recall as recall_at,
+    roc_auc,
+    threshold_sweep,
+)
 
 
 @dataclass
@@ -50,6 +61,13 @@ class SystemMetrics:
     false_positives: list[dict] = field(default_factory=list)
     false_negatives: list[dict] = field(default_factory=list)
     per_category: dict[str, dict] = field(default_factory=dict)
+    # Per-sample (label, score) records for bootstrap CIs and threshold sweeps.
+    records: list[tuple[int, float]] = field(default_factory=list)
+    # Statistical annotations (filled by annotate_statistics).
+    ci: dict[str, list[float]] = field(default_factory=dict)
+    pr_curve: list[dict] = field(default_factory=list)
+    auc: dict[str, float] = field(default_factory=dict)
+    by_attack_class: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass
@@ -61,6 +79,8 @@ class BenchmarkResults:
     python_version: str = ""
     inferwall_version: str = ""
     phi4_model: str = ""
+    seed: int = 42
+    provenance: dict = field(default_factory=dict)
     metrics: list[dict] = field(default_factory=list)
 
 
@@ -97,6 +117,77 @@ def compute_metrics(
     return metrics
 
 
+def attack_class(sample: BenchmarkSample) -> str:
+    """Normalize a sample to a coarse attack class for the split report.
+
+    injection / jailbreak / benign. deepset and safeguard use category
+    'injection'; jackhhao and toxic-chat label jailbreak/jailbreaking; benign
+    samples (label 0) collapse to 'benign' regardless of source.
+    """
+    if sample.label == 0:
+        return "benign"
+    cat = (sample.category or "").lower()
+    if "jailbreak" in cat:
+        return "jailbreak"
+    if "injection" in cat:
+        return "injection"
+    # toxic-chat malicious uses 'jailbreaking'; default unknown malicious to
+    # injection so it still lands in a positive class rather than 'unknown'.
+    return "injection"
+
+
+def annotate_statistics(
+    metrics: SystemMetrics, samples: list[BenchmarkSample], threshold: float, seed: int
+) -> None:
+    """Attach bootstrap CIs, threshold sweep + AUC, and attack-class splits.
+
+    ``threshold`` is the score at/above which a sample counts as predicted
+    positive — the policy's inbound flag threshold, so the CI metrics line up
+    with the headline recall/precision computed from decisions.
+    """
+    recs = metrics.records
+    if not recs:
+        return
+    for label, fn in (
+        ("recall", recall_at),
+        ("precision", precision_at),
+        ("f1", f1_at),
+        ("fpr", fpr_at),
+    ):
+        point, lo, hi = bootstrap_ci(recs, fn, threshold=threshold, seed=seed)
+        metrics.ci[label] = [round(point, 4), round(lo, 4), round(hi, 4)]
+
+    sweep = threshold_sweep(recs)
+    metrics.pr_curve = sweep
+    metrics.auc = {
+        "roc_auc": round(roc_auc(recs), 4),
+        "pr_auc": round(pr_auc(sweep), 4),
+    }
+
+    # Per-attack-class split. Positives are split by class; benign recall is
+    # undefined, so for benign we report FPR instead.
+    by_class: dict[str, list[tuple[int, float]]] = {}
+    for sample, (label, sc) in zip(samples, recs):
+        by_class.setdefault(attack_class(sample), []).append((label, sc))
+    # Benign FPR needs negatives present; attach the full negative pool to it.
+    negatives = [(label, sc) for (label, sc) in recs if label == 0]
+    out: dict[str, dict] = {}
+    for cls, cls_recs in by_class.items():
+        if cls == "benign":
+            out[cls] = {
+                "n": len(cls_recs),
+                "fpr": round(fpr_at(negatives, threshold), 4),
+            }
+        else:
+            # Recall for a positive class: that class's positives only.
+            pos = [(label, sc) for (label, sc) in cls_recs if label == 1]
+            out[cls] = {
+                "n": len(pos),
+                "recall": round(recall_at(pos, threshold), 4),
+            }
+    metrics.by_attack_class = out
+
+
 def update_counts(
     metrics: SystemMetrics,
     sample: BenchmarkSample,
@@ -110,6 +201,9 @@ def update_counts(
     if cat not in category_stats:
         category_stats[cat] = {"tp": 0, "fp": 0, "tn": 0, "fn": 0, "total": 0}
     category_stats[cat]["total"] += 1
+
+    # Retain per-sample (label, score) for bootstrap CIs and threshold sweeps.
+    metrics.records.append((sample.label, float(score)))
 
     if sample.label == 1 and predicted_positive:
         metrics.tp += 1
@@ -132,9 +226,9 @@ def update_counts(
 
 
 def run_inferwall(
-    profile: str, dataset_name: str, samples: list[BenchmarkSample]
+    profile: str, dataset_name: str, samples: list[BenchmarkSample], seed: int = 42
 ) -> SystemMetrics:
-    """Run InferenceWall on a dataset."""
+    """Run InferenceWall on a dataset and attach statistical annotations."""
     import inferwall
 
     os.environ["IW_PROFILE"] = profile
@@ -143,6 +237,10 @@ def run_inferwall(
     # Warm-up
     for _ in range(3):
         inferwall.scan_input("warm up call")
+
+    # The score threshold at which a sample counts as predicted-positive, taken
+    # from the live policy so CI metrics align with the decision-based headline.
+    threshold = inferwall._get_pipeline().policy.inbound_flag_threshold
 
     system_name = f"inferwall-{profile}"
     metrics = SystemMetrics(system=system_name, dataset=dataset_name, total=len(samples))
@@ -158,7 +256,9 @@ def run_inferwall(
         if (i + 1) % 500 == 0:
             print(f"    {i + 1}/{len(samples)}...", flush=True)
 
-    return compute_metrics(metrics, category_stats)
+    compute_metrics(metrics, category_stats)
+    annotate_statistics(metrics, samples, threshold, seed)
+    return metrics
 
 
 def run_phi4(
@@ -212,8 +312,15 @@ def main() -> None:
     parser.add_argument("--skip-inferwall", action="store_true")
     parser.add_argument("--output", default="results/benchmark.json")
     parser.add_argument("--report", default="results/benchmark_report.md")
+    parser.add_argument(
+        "--seed", type=int, default=42,
+        help="Global seed for sampling/shuffling and bootstrap CIs",
+    )
     args = parser.parse_args()
 
+    import random as _random
+
+    _random.seed(args.seed)
     dataset_names = [d.strip() for d in args.datasets.split(",")]
     profiles = [p.strip() for p in args.profiles.split(",")]
 
@@ -250,7 +357,7 @@ def main() -> None:
             print(f"=== InferenceWall ({profile}) ===")
             for ds_name, samples in datasets.items():
                 print(f"  {ds_name} ({len(samples)} samples)...", flush=True)
-                m = run_inferwall(profile, ds_name, samples)
+                m = run_inferwall(profile, ds_name, samples, seed=args.seed)
                 all_metrics.append(m)
                 print(
                     f"    -> Recall={m.recall:.1%} Prec={m.precision:.1%} "
@@ -274,6 +381,10 @@ def main() -> None:
         print(f"WARNING: Phi-4 model not found at {args.phi4_model}, skipping")
         print()
 
+    # Capture reproducibility provenance: dataset revisions, policy thresholds,
+    # model SHA256s, bench git commit, and the global seed.
+    provenance = collect_provenance(dataset_names, profiles, args.seed)
+
     # Save results
     results = BenchmarkResults(
         timestamp=time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -281,6 +392,8 @@ def main() -> None:
         python_version=platform.python_version(),
         inferwall_version=inferwall.__version__,
         phi4_model=args.phi4_model if not args.skip_phi4 else "",
+        seed=args.seed,
+        provenance=provenance,
         metrics=[asdict(m) for m in all_metrics],
     )
 
