@@ -15,6 +15,25 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DATA_DIR = Path(__file__).parent / "data"
+LOCK_PATH = Path(__file__).parent / "DATASETS.lock"
+
+
+def _load_lock() -> dict:
+    """Read the pinned dataset-revision lock file (DATASETS.lock)."""
+    try:
+        return json.loads(LOCK_PATH.read_text(encoding="utf-8")).get("datasets", {})
+    except FileNotFoundError:
+        return {}
+
+
+_LOCK = _load_lock()
+
+
+def _revision(name: str) -> str | None:
+    """Pinned HF revision SHA for a dataset, or None if not locked."""
+    rev = _LOCK.get(name, {}).get("revision")
+    # 'local-jsonl' is a sentinel for the file-backed corpus, not an HF SHA.
+    return rev if rev and rev != "local-jsonl" else None
 
 
 @dataclass
@@ -40,7 +59,12 @@ def load_deepset() -> list[BenchmarkSample]:
     """
     from datasets import load_dataset
 
-    ds = load_dataset("deepset/prompt-injections", split="test", token=_hf_token())
+    ds = load_dataset(
+        "deepset/prompt-injections",
+        split="test",
+        revision=_revision("deepset"),
+        token=_hf_token(),
+    )
     return [
         BenchmarkSample(
             text=row["text"],
@@ -61,7 +85,10 @@ def load_jackhhao() -> list[BenchmarkSample]:
     from datasets import load_dataset
 
     ds = load_dataset(
-        "jackhhao/jailbreak-classification", split="test", token=_hf_token()
+        "jackhhao/jailbreak-classification",
+        split="test",
+        revision=_revision("jackhhao"),
+        token=_hf_token(),
     )
     return [
         BenchmarkSample(
@@ -83,7 +110,11 @@ def load_toxic_chat() -> list[BenchmarkSample]:
     from datasets import load_dataset
 
     ds = load_dataset(
-        "lmsys/toxic-chat", "toxicchat0124", split="test", token=_hf_token()
+        "lmsys/toxic-chat",
+        "toxicchat0124",
+        split="test",
+        revision=_revision("toxic-chat"),
+        token=_hf_token(),
     )
     return [
         BenchmarkSample(
@@ -105,7 +136,10 @@ def load_safeguard() -> list[BenchmarkSample]:
     from datasets import load_dataset
 
     ds = load_dataset(
-        "xTRam1/safe-guard-prompt-injection", split="test", token=_hf_token()
+        "xTRam1/safe-guard-prompt-injection",
+        split="test",
+        revision=_revision("safeguard"),
+        token=_hf_token(),
     )
     return [
         BenchmarkSample(

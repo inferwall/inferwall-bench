@@ -1,0 +1,31 @@
+{
+  "_comment": "Pinned HuggingFace dataset revisions for reproducible benchmarks. Resolved 2026-06-13 via huggingface_hub.HfApi().dataset_info(...).sha against the public Hub. loaders.py reads this file and passes revision=<sha> to load_dataset so a future upstream edit cannot silently change the headline. Regenerate with: python tests/benchmark/provenance.py --refresh-lock",
+  "resolved_at": "2026-06-13",
+  "datasets": {
+    "deepset": {
+      "hf_id": "deepset/prompt-injections",
+      "split": "test",
+      "revision": "4f61ecb038e9c3fb77e21034b22511b523772cdd"
+    },
+    "jackhhao": {
+      "hf_id": "jackhhao/jailbreak-classification",
+      "split": "test",
+      "revision": "2f2ceeb39658696fd3f462403562b6eea5306287"
+    },
+    "toxic-chat": {
+      "hf_id": "lmsys/toxic-chat",
+      "config": "toxicchat0124",
+      "split": "test",
+      "revision": "29df8e4dba60e1f4af4b4075c0705c5b313548a8"
+    },
+    "safeguard": {
+      "hf_id": "xTRam1/safe-guard-prompt-injection",
+      "split": "test",
+      "revision": "a3a877d608f37b7d20d9945671902df895ecdb46"
+    },
+    "realistic-benign": {
+      "local": "tests/benchmark/data/realistic_benign.jsonl",
+      "revision": "local-jsonl"
+    }
+  }
+}
