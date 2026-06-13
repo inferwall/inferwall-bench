@@ -22,7 +22,9 @@ jobs:
           uv pip install datasets
 
       - name: Run Lite benchmark
-        run: uv run python tests/benchmark/run_benchmark.py --profiles lite --datasets custom,owasp --output results/lite.json --report results/lite_report.md
+        env:
+          PYTHONPATH: .
+        run: uv run python tests/benchmark/run_benchmark.py --profiles lite --datasets deepset,jackhhao,realistic-benign --skip-phi4 --output results/lite.json --report results/lite_report.md
 
       - name: Show results
         run: cat results/lite_report.md
